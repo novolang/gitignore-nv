@@ -1,0 +1,164 @@
+// gipattern_tests.nv — the pattern grammar of gitignore(5), one rule
+// per case.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// gitignore-nv.gipattern.<fn>`.  What is asserted is where the slash
+// changes the meaning, that a trailing slash is a question about the
+// filesystem, and that a gitignore file has no syntax errors.
+
+use std.test
+use gipattern
+
+@test
+fn test_a_gitignore_file_has_no_syntax_errors() [io]
+    // Every line is something.  A library that invented a refusal
+    // would refuse files git reads without complaint.
+    test.case("a blank line matches nothing and is kept, so line numbers survive")
+    let blank = gipattern.parse("")
+    test.assert(gipattern.kind_name(blank.kind) == "blank")
+    test.assert(not gipattern.is_rule(blank))
+
+    test.case("a line beginning with # is a comment")
+    test.assert(gipattern.kind_name(gipattern.parse("# build output").kind) == "comment")
+
+    test.case("and a rule that really begins with a hash is written with an escape")
+    let hash = gipattern.parse("\\#not-a-comment")
+    test.assert(gipattern.kind_name(hash.kind) == "rule")
+    test.assert(hash.body == "#not-a-comment")
+
+    test.case("the one line git calls undefined is named rather than silently dropped")
+    let dangling = gipattern.parse("build\\")
+    test.assert(gipattern.kind_name(dangling.kind) == "malformed")
+    test.assert(not gipattern.is_rule(dangling))
+    test.assert(not gipattern.matches(dangling, "build", true, gipattern.options()))
+
+@test
+fn test_where_the_slash_is_decides_what_the_pattern_means() [io]
+    // The rule everybody gets wrong: a slash anywhere except at the
+    // end anchors the pattern to its file's directory.
+    test.case("no slash at all matches a component name at any depth")
+    let loose = gipattern.parse("frotz")
+    test.assert(not loose.anchored)
+    test.assert(gipattern.matches(loose, "frotz", false, gipattern.options()))
+    test.assert(gipattern.matches(loose, "a/doc/frotz", false, gipattern.options()))
+
+    test.case("a slash in the middle anchors it")
+    let anchored = gipattern.parse("doc/frotz")
+    test.assert(anchored.anchored)
+    test.assert(gipattern.matches(anchored, "doc/frotz", false, gipattern.options()))
+    test.assert(not gipattern.matches(anchored, "a/doc/frotz", false, gipattern.options()))
+
+    test.case("a leading slash is the same rule seen from the other side")
+    let rooted = gipattern.parse("/build")
+    test.assert(rooted.anchored)
+    test.assert(rooted.body == "build")
+    test.assert(gipattern.matches(rooted, "build", true, gipattern.options()))
+    test.assert(not gipattern.matches(rooted, "src/build", true, gipattern.options()))
+
+    test.case("and a slash only at the end does not anchor")
+    let dironly = gipattern.parse("build/")
+    test.assert(not dironly.anchored)
+    test.assert(gipattern.matches(dironly, "src/build", true, gipattern.options()))
+
+@test
+fn test_a_trailing_slash_is_a_question_about_the_filesystem() [io]
+    // Nothing here can tell whether a path is a directory, so the
+    // caller says.  Guessing would disagree with git on every rule
+    // written this way.
+    let p = gipattern.parse("doc/frotz/")
+
+    test.case("it matches a directory")
+    test.assert(p.directory_only)
+    test.assert(gipattern.matches(p, "doc/frotz", true, gipattern.options()))
+
+    test.case("and not a file of the same name")
+    test.assert(not gipattern.matches(p, "doc/frotz", false, gipattern.options()))
+
+    test.case("a rule without one matches either")
+    let both = gipattern.parse("doc/frotz")
+    test.assert(gipattern.matches(both, "doc/frotz", true, gipattern.options()))
+    test.assert(gipattern.matches(both, "doc/frotz", false, gipattern.options()))
+
+@test
+fn test_negation_is_read_here_and_applied_somewhere_else() [io]
+    // A negated rule that matches answers true.  What a match MEANS is
+    // the matcher's decision, and keeping the two apart is what lets
+    // `matching_rules` list every rule involved.
+    let p = gipattern.parse("!keep.log")
+
+    test.case("the bang is read off the line")
+    test.assert(p.negated)
+    test.assert(p.body == "keep.log")
+
+    test.case("and the rule still matches what it names")
+    test.assert(gipattern.matches(p, "keep.log", false, gipattern.options()))
+
+    test.case("a literal bang at the start is written with an escape")
+    let literal = gipattern.parse("\\!important")
+    test.assert(not literal.negated)
+    test.assert(literal.body == "!important")
+
+@test
+fn test_the_wildcards_are_the_ones_glob_already_has() [io]
+    // gitignore(5) describes fnmatch(3) with FNM_PATHNAME, which is
+    // what glob-nv's `matches` means.
+    let o = gipattern.options()
+
+    test.case("a star stops at a slash")
+    let star = gipattern.parse("src/*.o")
+    test.assert(gipattern.matches(star, "src/main.o", false, o))
+    test.assert(not gipattern.matches(star, "src/a/main.o", false, o))
+
+    test.case("a double star written as a whole segment crosses them")
+    let deep = gipattern.parse("src/**/target")
+    test.assert(gipattern.matches(deep, "src/a/b/target", true, o))
+
+    test.case("a character class is a class")
+    let klass = gipattern.parse("*.[oa]")
+    test.assert(gipattern.matches(klass, "main.o", false, o))
+    test.assert(gipattern.matches(klass, "libx.a", false, o))
+    test.assert(not gipattern.matches(klass, "main.c", false, o))
+
+    test.case("and a rule with no wildcard says so, because a comparison is cheaper")
+    test.assert(gipattern.has_wildcard(star))
+    test.assert(not gipattern.has_wildcard(gipattern.parse("build")))
+
+@test
+fn test_a_star_in_a_gitignore_file_reaches_a_dotfile() [io]
+    // A shell's `*` does not match `.gitignore` and gitignore's does.
+    // It is one flag, and getting it wrong ignores every hidden file
+    // in a repository or none of them.
+    let o = gipattern.options()
+
+    test.case("the option this package matches under")
+    test.assert(not o.literal_leading_dot)
+    test.assert(not o.case_fold)
+
+    test.case("so a bare star reaches a name beginning with a dot")
+    test.assert(gipattern.matches(gipattern.parse("*"), ".env", false, o))
+
+    test.case("and a repository configured case-insensitively is a caller's fact to pass")
+    test.assert(gipattern.ignore_case(o).case_fold)
+    test.assert(gipattern.matches(gipattern.parse("*.O"), "main.o", false,
+                                  gipattern.ignore_case(o)))
+
+@test
+fn test_the_translation_handed_to_glob_is_visible() [io]
+    // A matcher nobody can inspect is a matcher nobody can debug.
+    test.case("an unanchored rule matches a name at any depth")
+    test.assert(gipattern.glob_pattern(gipattern.parse("*.o")) == "**/*.o")
+
+    test.case("and an anchored one is itself")
+    test.assert(gipattern.glob_pattern(gipattern.parse("doc/frotz")) == "doc/frotz")
+
+@test
+fn test_a_walker_can_ask_whether_a_subtree_is_worth_opening() [io]
+    // A question about the pattern and the path. It opens nothing.
+    let o = gipattern.options()
+    let p = gipattern.parse("src/**/target/")
+
+    test.case("a directory something under it could match")
+    test.assert(gipattern.may_contain_match(p, "src/a", o))
+
+    test.case("and one nothing under it could")
+    test.assert(not gipattern.may_contain_match(p, "docs", o))

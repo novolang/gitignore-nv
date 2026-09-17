@@ -1,0 +1,111 @@
+// gilist_tests.nv — one file, its base directory, and last-match-wins.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// gitignore-nv.gilist.<fn>`.  What is asserted is that the last
+// matching line decides, that a nested file means nothing outside its
+// own subtree, and that a re-inclusion is a decision rather than a
+// shrug.
+
+use std.test
+use gilist
+use gipattern
+
+@test
+fn test_the_last_matching_line_decides() [io]
+    // gitignore(5) is explicit about this, and it is what makes `!`
+    // useful at all.
+    let l = gilist.parse("", "*.log\n!keep.log\n")
+    let o = gipattern.options()
+
+    test.case("an ordinary file is ignored by the first rule")
+    test.assert(gilist.decision_name(gilist.decide(l, "run.log", false, o)) == "ignored")
+
+    test.case("and the exception written after it wins")
+    test.assert(gilist.decision_name(gilist.decide(l, "keep.log", false, o)) == "included")
+
+    test.case("written the other way round, the exception loses")
+    let reversed = gilist.parse("", "!keep.log\n*.log\n")
+    test.assert(gilist.decision_name(gilist.decide(reversed, "keep.log", false, o)) == "ignored")
+
+    test.case("a path no rule names is unmatched, which is not the same as included")
+    test.assert(gilist.decision_name(gilist.decide(l, "README.md", false, o)) == "unmatched")
+
+@test
+fn test_a_decision_says_which_line_made_it() [io]
+    // `git check-ignore -v` prints exactly this, and a tool telling a
+    // user why their file is invisible needs it.
+    let l = gilist.parse("", "# build output\n*.log\n!keep.log\n")
+    let o = gipattern.options()
+
+    test.case("the line number counts blanks and comments, because the file does")
+    test.assert(gilist.decision_line(gilist.decide(l, "run.log", false, o)) == 2)
+    test.assert(gilist.decision_line(gilist.decide(l, "keep.log", false, o)) == 3)
+
+    test.case("and nothing matched has no line")
+    test.assert(gilist.decision_line(gilist.decide(l, "README.md", false, o)) == 0)
+
+    test.case("a blank and a comment are kept in the list so the numbering holds")
+    test.assert(list.len(l.patterns) == 3)
+    test.assert(list.len(gilist.rules_of(l)) == 2)
+
+@test
+fn test_both_decisions_settle_the_question_and_unmatched_does_not() [io]
+    // A re-inclusion stops a lower-precedence file from ignoring the
+    // path, which is why it is an answer and not a shrug.
+    test.case("ignored and included both settle it")
+    test.assert(gilist.is_decided(GiIgnored(2)))
+    test.assert(gilist.is_decided(GiIncluded(3)))
+
+    test.case("and unmatched sends the caller to the next source")
+    test.assert(not gilist.is_decided(GiUnmatched))
+
+@test
+fn test_a_nested_file_means_nothing_outside_its_own_subtree() [io]
+    // Every rule is relative to the directory its file sits in, which
+    // is why a list without a base is a list nobody can apply.
+    let nested = gilist.parse("docs", "build/\n")
+    let o = gipattern.options()
+
+    test.case("the same line means a different directory in a different file")
+    test.assert(gilist.decision_name(gilist.decide(nested, "docs/build", true, o)) == "ignored")
+
+    test.case("and says nothing about a path outside its base")
+    test.assert(gilist.decision_name(gilist.decide(nested, "src/build", true, o)) == "unmatched")
+
+    test.case("the top-level file's base is the root itself")
+    let top = gilist.parse("", "build/\n")
+    test.assert(top.base == "")
+    test.assert(gilist.decision_name(gilist.decide(top, "docs/build", true, o)) == "ignored")
+
+@test
+fn test_rules_can_come_from_somewhere_other_than_a_file() [io]
+    // A --exclude flag, a configuration key, a set compiled in.
+    let l = gilist.of("", [gipattern.parse("*.tmp"), gipattern.parse("!keep.tmp")])
+    let o = gipattern.options()
+
+    test.case("they behave exactly like lines of a file")
+    test.assert(list.len(l.patterns) == 2)
+    test.assert(gilist.decision_name(gilist.decide(l, "a.tmp", false, o)) == "ignored")
+    test.assert(gilist.decision_name(gilist.decide(l, "keep.tmp", false, o)) == "included")
+
+@test
+fn test_a_windows_line_ending_is_not_part_of_a_rule() [io]
+    // A gitignore file written on Windows is still a gitignore file,
+    // and a trailing carriage return in a pattern would match nothing.
+    let l = gilist.parse("", "*.log\r\n!keep.log\r\n")
+    let o = gipattern.options()
+
+    test.case("the rules are the same rules")
+    test.assert(gilist.decision_name(gilist.decide(l, "run.log", false, o)) == "ignored")
+    test.assert(gilist.decision_name(gilist.decide(l, "keep.log", false, o)) == "included")
+
+@test
+fn test_a_file_can_say_whether_a_subtree_is_worth_opening() [io]
+    let l = gilist.parse("", "src/**/target/\n")
+    let o = gipattern.options()
+
+    test.case("a directory whose contents a rule could reach")
+    test.assert(gilist.may_contain_match(l, "src/a", o))
+
+    test.case("and one nothing in this file can reach")
+    test.assert(not gilist.may_contain_match(l, "docs", o))

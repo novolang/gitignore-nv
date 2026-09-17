@@ -1,0 +1,254 @@
+// gipattern.nv — one line of a gitignore file, read as gitignore(5)'s
+// PATTERN FORMAT section describes it.
+//
+// A GITIGNORE FILE HAS NO SYNTAX ERRORS
+//
+// Every line is something.  A blank line matches nothing and is kept
+// as a separator, a line beginning with `#` is a comment, and
+// everything else is a rule.  So `parse` answers a `GiPattern` and
+// never a `Result`: there is no input for which git refuses to
+// continue reading the file, and a library that invented a refusal
+// would refuse files git accepts.
+//
+// The one line git itself calls undefined is a rule ending in a single
+// backslash, which is an escape with nothing after it.  That is
+// `GiMalformed`, and it matches nothing — but it is a value a caller
+// can see and warn about rather than a silent no-op.
+//
+// WHERE THE SLASH IS DECIDES WHAT THE PATTERN MEANS
+//
+// This is the rule everybody gets wrong, and it is one sentence:
+//
+//   a rule with a slash anywhere except at its end is matched against
+//   the whole path relative to the file the rule came from; a rule
+//   with no slash, or with a slash only at the end, is matched against
+//   the name of any single path component.
+//
+// So `doc/frotz` under the top-level file matches `doc/frotz` and not
+// `a/doc/frotz`, and `frotz` matches both.  A leading slash is the
+// same rule seen from the other side: it makes the pattern contain a
+// slash, so it anchors, and the slash itself is then dropped.
+//
+// THE TRAILING SLASH IS A QUESTION ABOUT THE FILESYSTEM
+//
+// `build/` matches only a directory, and nothing in this package can
+// tell whether a path is one.  So `matches` takes that as an argument.
+// A caller walking a tree knows; a caller filtering a list of paths
+// out of an archive knows; and a caller that does not know has to find
+// out, because guessing produces a matcher that disagrees with git on
+// every rule written this way.
+
+use glob
+
+// What a line of a gitignore file is.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println(gipattern.kind_name(gipattern.parse("# a comment").kind))
+// ```
+pub enum GiPatternKind
+    // A line with nothing on it but whitespace.  It matches nothing.
+    // Kept rather than dropped so that a line number in a `GiList` is
+    // the line number in the file, which is what a message pointing at
+    // a rule needs.
+    GiBlank
+    // A line whose first character is `#`.  A rule that really begins
+    // with a hash is written `\#`, and arrives here as a rule rather
+    // than a comment.
+    GiComment
+    // A rule: something that can match a path.
+    GiRule
+    // A rule ending in a single backslash — an escape with nothing
+    // after it.  gitignore(5) calls the behaviour undefined; here it
+    // matches nothing and says so, so a tool can warn about the line
+    // instead of silently doing nothing with it.
+    GiMalformed
+
+// One line of a gitignore file, with the three flags read off it.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     let p = gipattern.parse("!/build/")
+//     println("${p.negated} ${p.anchored} ${p.directory_only}")
+// ```
+pub struct GiPattern
+    // Which of the four kinds of line this is.
+    kind: GiPatternKind
+    // The line exactly as it was written, before anything was
+    // stripped.  A message that quotes the rule quotes this.
+    source: Str
+    // The pattern with the `!`, the anchoring slash and the trailing
+    // slash removed, and trailing unescaped whitespace stripped.  This
+    // is what is matched; `glob_pattern` is the same text with
+    // gitignore's anchoring made explicit for glob-nv.
+    body: Str
+    // Whether the line began with `!`: a match re-includes the path
+    // rather than ignoring it.
+    negated: Bool
+    // Whether the pattern is matched against the whole path relative
+    // to its file's directory, rather than against any one component's
+    // name.  True when the pattern held a slash anywhere except at its
+    // end.
+    anchored: Bool
+    // Whether the line ended with `/`: the rule matches a directory
+    // and nothing else.
+    directory_only: Bool
+
+// One line, read.
+//
+// The line is taken as it appears in the file, without its line
+// ending.  Nothing is refused: see the note at the top of this module.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     let p = gipattern.parse("build/")
+//     println(p.body)
+// ```
+pub fn parse(line: Str) -> GiPattern []
+    todo("gitignore-nv.gipattern.parse")
+
+// The kind's name for a message: `"blank"`, `"comment"`, `"rule"`,
+// `"malformed"`.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println(gipattern.kind_name(GiRule))
+// ```
+pub fn kind_name(k: GiPatternKind) -> Str []
+    todo("gitignore-nv.gipattern.kind_name")
+
+// Whether this line can match anything at all.
+//
+// True only for `GiRule`.  A caller iterating a file's lines uses it
+// to skip the three kinds that cannot match, without matching on the
+// enum at every call site.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println("${gipattern.is_rule(gipattern.parse("*.o"))}")
+//     println("${gipattern.is_rule(gipattern.parse(""))}")
+// ```
+pub fn is_rule(p: GiPattern) -> Bool []
+    todo("gitignore-nv.gipattern.is_rule")
+
+// Whether a rule matches a path.
+//
+// `path` is relative to the directory the rule's file sits in, with
+// `/` as the separator and no leading slash.  `is_dir` says whether
+// that path names a directory, which is the one fact about the
+// filesystem gitignore's rules need and the one thing this package
+// cannot find out for itself.
+//
+// A `GiBlank`, a `GiComment` and a `GiMalformed` all answer false.
+// Negation is NOT applied here: a negated rule that matches answers
+// true, and what a match means is the matcher's decision.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     let p = gipattern.parse("doc/frotz/")
+//     println("${gipattern.matches(p, "doc/frotz", true, gipattern.options())}")
+//     println("${gipattern.matches(p, "doc/frotz", false, gipattern.options())}")
+// ```
+pub fn matches(p: GiPattern, path: Str, is_dir: Bool, o: glob.Options) -> Bool []
+    todo("gitignore-nv.gipattern.matches")
+
+// Whether some path inside a directory could still match this rule.
+//
+// The question a caller walking a tree asks before it descends, and
+// the reason a walk over a large repository does not read all of it.
+// A directory that matches outright answers true as well, since
+// something under it may match too.
+//
+// This is a question about the pattern, not about the filesystem: it
+// opens nothing.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     let p = gipattern.parse("src/**/target")
+//     println("${gipattern.may_contain_match(p, "src/a", gipattern.options())}")
+//     println("${gipattern.may_contain_match(p, "docs", gipattern.options())}")
+// ```
+pub fn may_contain_match(p: GiPattern, dir: Str, o: glob.Options) -> Bool []
+    todo("gitignore-nv.gipattern.may_contain_match")
+
+// The glob pattern this rule is matched with.
+//
+// The translation, made visible.  An anchored rule becomes itself; an
+// unanchored one becomes `**/` and itself, which is what "matches any
+// single path component's name at any depth" is in glob's vocabulary.
+// A caller debugging a rule that does not do what its author expected
+// reads this and the answer is usually there.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println(gipattern.glob_pattern(gipattern.parse("*.o")))
+//     println(gipattern.glob_pattern(gipattern.parse("doc/frotz")))
+// ```
+pub fn glob_pattern(p: GiPattern) -> Str []
+    todo("gitignore-nv.gipattern.glob_pattern")
+
+// The glob-nv options gitignore's rules are matched under.
+//
+// Case-sensitive, and a `*` reaches a name beginning with a dot.  The
+// second is the one worth writing down: a shell's `*` does not match
+// `.gitignore` and gitignore's does, so `*` in a gitignore file
+// matches every dotfile in the directory.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println("${gipattern.options().literal_leading_dot}")
+// ```
+pub fn options() -> glob.Options []
+    todo("gitignore-nv.gipattern.options")
+
+// The same options with ASCII case folding on, for a repository whose
+// `core.ignoreCase` is true.
+//
+// A repository on a case-insensitive filesystem is configured that
+// way, and a matcher that ignored it would answer differently from
+// git on exactly the platforms where it matters.  This package cannot
+// read a configuration file, so the caller passes the answer.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println("${gipattern.ignore_case(gipattern.options()).case_fold}")
+// ```
+pub fn ignore_case(o: glob.Options) -> glob.Options []
+    todo("gitignore-nv.gipattern.ignore_case")
+
+// Whether the rule holds a wildcard at all: `*`, `?`, `[` or `**`.
+//
+// A rule that is a plain name can be compared rather than matched, and
+// a caller with ten thousand paths and a thousand rules cares.  It is
+// also what a tool checking a gitignore file for a rule that was meant
+// to be a glob and is not looks at.
+//
+// ```novo
+// use gipattern
+//
+// fn main() [io]
+//     println("${gipattern.has_wildcard(gipattern.parse("*.o"))}")
+//     println("${gipattern.has_wildcard(gipattern.parse("build"))}")
+// ```
+pub fn has_wildcard(p: GiPattern) -> Bool []
+    todo("gitignore-nv.gipattern.has_wildcard")

@@ -1,0 +1,50 @@
+[package]
+name        = "gitignore-nv"
+version     = "0.0.1"
+description = "gitignore(5) semantics as a matcher value: the pattern grammar with negation, anchoring, directory-only rules, `**`, character classes and escaping, several files each with its own base directory, and the precedence that decides between them — answered over a path the caller hands in, with no directory ever opened."
+license     = "Apache-2.0"
+
+# An INTERFACE release: every `pub fn` body is a `todo()`, so the
+# signatures and the effect rows are published and nothing is
+# implemented.  `novo pkg publish` recognises the shape and requires
+# both the draft stability and the 0.0.x version; the first
+# implementation is the 0.1.0 published over it.
+stability   = "draft"
+
+# `core`.  Every question here is about two strings the caller already
+# holds: a pattern and a path.  Nothing reads a directory, and the one
+# fact about the filesystem that gitignore's rules need — whether a
+# path is a directory — arrives as an argument, because a package with
+# no effects cannot go and look.
+layer       = "core"
+
+category    = "tooling"
+
+tags        = ["gitignore", "ignore", "pathspec", "git", "pattern", "matcher", "exclude", "tooling"]
+repository  = "https://github.com/novolang/gitignore-nv"
+maintainers = ["novo-lang"]
+novo        = ">= 0.9.0"
+
+# A library: no `main`, so `novo pkg build` type-checks and
+# effect-checks every module under `src/` and writes no binary.
+
+[docs.pages]
+"README.md" = "gitignore(5) patterns and precedence, over paths the caller hands in"
+
+[dependencies]
+# glob-nv is the wildcard half, and it is the whole wildcard half.
+# gitignore(5)'s PATTERN FORMAT section describes fnmatch(3) with
+# FNM_PATHNAME: `*` and `?` and a character class stop at a slash, and
+# `**` written as a whole path segment crosses them.  That is precisely
+# what `glob.matches` means, down to the backtracking that keeps a
+# pattern of many stars cheap.
+#
+# What this package carries is everything gitignore adds on top and
+# glob has no notion of: `!` negation, a trailing slash meaning
+# directory-only, the rule that a slash anywhere but the end anchors a
+# pattern to its file's directory, several files each with its own
+# base, and last-match-wins precedence.  `gipattern.glob_pattern` and
+# `gipattern.glob_options` show exactly what is handed down, so the
+# translation is inspectable rather than folded into a matcher nobody
+# can debug.
+glob-nv = "^0.1"

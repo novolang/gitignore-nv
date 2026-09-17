@@ -1,0 +1,141 @@
+// gimatcher_tests.nv — several sources, their order, and the rule that
+// trips every reimplementation.
+//
+// RED ON PURPOSE: every assertion reaches `not implemented:
+// gitignore-nv.gimatcher.<fn>`.  What is asserted is that a file
+// cannot be re-included under an excluded directory, that a
+// higher-precedence source wins outright, and that a walker can decide
+// whether to descend without opening anything.
+
+use std.test
+use gilist
+use gimatcher
+
+@test
+fn test_a_file_under_an_excluded_directory_cannot_be_re_included() [io]
+    // gitignore(5): "It is not possible to re-include a file if a
+    // parent directory of that file is excluded."  Git never descends
+    // into an ignored directory, so it never reads the rule that would
+    // have re-included the file.  A matcher that only looked at the
+    // path would disagree with `git check-ignore` here.
+    let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "src/\n!src/keep.log\n"))
+
+    test.case("the ancestor decides, and the exception never runs")
+    test.assert(gilist.decision_name(gimatcher.decide(m, "src/keep.log", false)) == "ignored")
+    test.assert(gimatcher.is_ignored(m, "src/keep.log", false))
+
+    test.case("and the rules on their own say the opposite, which is why both exist")
+    test.assert(gilist.decision_name(gimatcher.decide_alone(m, "src/keep.log", false)) == "included")
+
+    test.case("with the directory not excluded, the exception works")
+    let open_tree = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.log\n!src/keep.log\n"))
+    test.assert(not gimatcher.is_ignored(open_tree, "src/keep.log", false))
+
+    test.case("the ancestors a path has, shallowest first")
+    let parents = gimatcher.ancestors_of("a/b/c.txt")
+    test.assert(list.len(parents) == 2)
+    test.assert(parents[0] == "a")
+    test.assert(parents[1] == "a/b")
+
+@test
+fn test_a_higher_precedence_source_wins_outright() [io]
+    // `add` appends a source of LOWER precedence, so a caller builds
+    // the stack in the order gitignore(5) lists the four places and
+    // never thinks about the direction again.
+    let deep = gilist.parse("src", "!keep.log\n")
+    let top = gilist.parse("", "*.log\n")
+    let m = gimatcher.add(gimatcher.add(gimatcher.empty(), deep), top)
+
+    test.case("the deeper file was added first, so it decides")
+    test.assert(not gimatcher.is_ignored(m, "src/keep.log", false))
+    test.assert(gimatcher.deciding_source(m, "src/keep.log", false) == 0)
+
+    test.case("and the top-level file still decides what the deeper one says nothing about")
+    test.assert(gimatcher.is_ignored(m, "src/run.log", false))
+    test.assert(gimatcher.deciding_source(m, "src/run.log", false) == 1)
+
+    test.case("a path no source names has no deciding source")
+    test.assert(gimatcher.deciding_source(m, "README.md", false) == 0 - 1)
+
+    test.case("the sources are in the order they were added")
+    test.assert(list.len(m.sources) == 2)
+
+@test
+fn test_an_empty_matcher_ignores_nothing() [io]
+    test.case("no sources, no decisions")
+    let m = gimatcher.empty()
+    test.assert(list.len(m.sources) == 0)
+    test.assert(not gimatcher.is_ignored(m, "anything", false))
+    test.assert(gilist.decision_name(gimatcher.decide(m, "anything", false)) == "unmatched")
+
+    test.case("and a walker descends everywhere")
+    test.assert(gimatcher.should_descend(m, "target"))
+
+@test
+fn test_a_walker_decides_whether_to_descend_without_opening_anything() [io]
+    let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "target/\n"))
+
+    test.case("an ignored directory nothing re-includes under is not worth reading")
+    test.assert(not gimatcher.should_descend(m, "target"))
+
+    test.case("and an ordinary one is")
+    test.assert(gimatcher.should_descend(m, "src"))
+
+    test.case("an ignored directory with a re-inclusion under it has to be read")
+    let exception = gimatcher.add(gimatcher.empty(),
+                                  gilist.parse("", "target/\n!target/keep.txt\n"))
+    test.assert(gimatcher.should_descend(exception, "target"))
+
+@test
+fn test_the_case_rule_is_the_repositorys_and_this_package_is_told_it() [io]
+    // Nothing here can read a configuration file, so `core.ignoreCase`
+    // arrives as a call.
+    let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.LOG\n"))
+
+    test.case("case-sensitive by default, and a star still reaches a dotfile")
+    test.assert(not gimatcher.options_of(m).case_fold)
+    test.assert(not gimatcher.options_of(m).literal_leading_dot)
+    test.assert(not gimatcher.is_ignored(m, "run.log", false))
+
+    test.case("and folded when the caller says the repository is")
+    let folded = gimatcher.case_insensitive(m)
+    test.assert(gimatcher.options_of(folded).case_fold)
+    test.assert(gimatcher.is_ignored(folded, "run.log", false))
+
+@test
+fn test_every_rule_involved_can_be_listed_not_only_the_winner() [io]
+    // A linter looking for a rule no path can reach wants all of them.
+    let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.log\n!keep.log\n"))
+
+    test.case("both rules match, and the list is in precedence order")
+    let rules = gimatcher.matching_rules(m, "keep.log", false)
+    test.assert(list.len(rules) == 2)
+    test.assert(not rules[0].negated)
+    test.assert(rules[1].negated)
+
+    test.case("and a path nothing names has an empty list")
+    test.assert(list.len(gimatcher.matching_rules(m, "README.md", false)) == 0)
+
+@test
+fn test_a_path_is_put_into_its_files_frame_before_it_is_matched() [io]
+    // The arithmetic `gilist.decide` does, offered on its own because
+    // a caller building a source for a nested file needs it too.
+    test.case("the root's base leaves a path alone")
+    match gimatcher.under_base("", "a/b")
+        Some(rest) => test.assert(rest == "a/b")
+        None       => test.fail("every path is under the root")
+
+    test.case("a nested base strips itself")
+    match gimatcher.under_base("a", "a/b")
+        Some(rest) => test.assert(rest == "b")
+        None       => test.fail("a/b is under a")
+
+    test.case("and a path outside the base is not under it")
+    match gimatcher.under_base("a", "c")
+        Some(_) => test.fail("c is not under a")
+        None    => test.assert(true)
+
+    test.case("a prefix that is not a whole component does not count")
+    match gimatcher.under_base("a", "ab/c")
+        Some(_) => test.fail("ab is not a")
+        None    => test.assert(true)

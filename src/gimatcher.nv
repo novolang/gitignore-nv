@@ -1,0 +1,265 @@
+// gimatcher.nv — several gitignore files, and the order they are
+// consulted in.
+//
+// THE PRECEDENCE ORDER, FROM gitignore(5)
+//
+// Git reads rules from four places and consults them in this order,
+// the first that decides winning:
+//
+//   1. patterns given on the command line;
+//   2. the gitignore file in the same directory as the path, then the
+//      one in its parent, and so on up to the top of the working tree
+//      — a deeper file overriding a shallower one;
+//   3. `$GIT_DIR/info/exclude`;
+//   4. the file named by `core.excludesFile`.
+//
+// A `GiMatcher` is those sources in that order.  `add` appends a
+// source of LOWER precedence than everything already in it, so a
+// caller builds the stack in the order above and never has to think
+// about the direction again.  Within one source the last matching line
+// wins, which `gilist` does.
+//
+// THE RULE THAT TRIPS EVERY REIMPLEMENTATION
+//
+// gitignore(5): "It is not possible to re-include a file if a parent
+// directory of that file is excluded."  A `!src/keep.log` under a
+// `src/` that is itself ignored does nothing, because git never
+// descends into an ignored directory and so never reads the file.
+//
+// So `decide` checks the path's ancestor directories first, deepest
+// last, and stops at the first one that is ignored.  A matcher that
+// only looked at the path would report `src/keep.log` as re-included
+// and git would report it as ignored, which is the difference between
+// a tool that agrees with `git check-ignore` and a tool that does not.
+//
+// `decide_alone` is the other question — what the rules say about this
+// path on its own — and it is a separate function because the two
+// answers differ and a caller should have to say which it wants.
+
+use gilist
+use gipattern
+use glob
+
+// An ordered stack of gitignore sources.
+//
+// ```novo
+// use gimatcher
+//
+// fn main() [io]
+//     println("${list.len(gimatcher.empty().sources)}")
+// ```
+pub struct GiMatcher
+    // The sources, highest precedence first.
+    sources: [gilist.GiList]
+    // The options every match is made under: case folding, from a
+    // repository's `core.ignoreCase`.
+    options: glob.Options
+
+// A matcher with no sources, which ignores nothing.
+//
+// ```novo
+// use gimatcher
+//
+// fn main() [io]
+//     println("${gimatcher.is_ignored(gimatcher.empty(), "anything", false)}")
+// ```
+pub fn empty() -> GiMatcher []
+    todo("gitignore-nv.gimatcher.empty")
+
+// The same matcher with one more source, of lower precedence than
+// every source already in it.
+//
+// So a caller adds the command-line patterns first, then the gitignore
+// files from the deepest directory upwards, then `info/exclude`, then
+// the global file — the order gitignore(5) lists them in, read top to
+// bottom.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.o\n"))
+//     println("${list.len(m.sources)}")
+// ```
+pub fn add(m: GiMatcher, source: gilist.GiList) -> GiMatcher []
+    todo("gitignore-nv.gimatcher.add")
+
+// The same matcher with ASCII case folding on, for a repository whose
+// `core.ignoreCase` is true.
+//
+// ```novo
+// use gimatcher
+//
+// fn main() [io]
+//     println("${gimatcher.case_insensitive(gimatcher.empty()).options.case_fold}")
+// ```
+pub fn case_insensitive(m: GiMatcher) -> GiMatcher []
+    todo("gitignore-nv.gimatcher.case_insensitive")
+
+// What the whole stack says about a path, ancestors included.
+//
+// `path` is relative to the root, with `/` as the separator and no
+// leading slash.  `is_dir` says whether it names a directory.
+//
+// The ancestors are checked first, shallowest to deepest: if any
+// directory on the way to this path is ignored, the answer is that
+// directory's `GiIgnored` and no rule about the path itself is
+// consulted.  That is gitignore(5)'s re-inclusion rule, and it is what
+// makes this function agree with `git check-ignore`.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "src/\n!src/keep.log\n"))
+//     println(gilist.decision_name(gimatcher.decide(m, "src/keep.log", false)))
+// ```
+pub fn decide(m: GiMatcher, path: Str, is_dir: Bool) -> gilist.GiDecision []
+    todo("gitignore-nv.gimatcher.decide")
+
+// What the rules say about this path alone, with no ancestor
+// consulted.
+//
+// The answer to "does any rule name this path", which is what a tool
+// explaining a gitignore file wants and what a caller that has already
+// established the ancestors are fine can use.  It is NOT the answer to
+// "would git ignore this", and the two differ exactly when an ancestor
+// is ignored.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "src/\n!src/keep.log\n"))
+//     println(gilist.decision_name(gimatcher.decide_alone(m, "src/keep.log", false)))
+// ```
+pub fn decide_alone(m: GiMatcher, path: Str, is_dir: Bool) -> gilist.GiDecision []
+    todo("gitignore-nv.gimatcher.decide_alone")
+
+// Whether a path is ignored: `decide` answering `GiIgnored`.
+//
+// The one-line question, for the callers that do not need to know
+// which rule decided.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.o\n"))
+//     println("${gimatcher.is_ignored(m, "main.o", false)}")
+// ```
+pub fn is_ignored(m: GiMatcher, path: Str, is_dir: Bool) -> Bool []
+    todo("gitignore-nv.gimatcher.is_ignored")
+
+// Whether a walker should descend into a directory.
+//
+// False when the directory is ignored and no source could re-include
+// anything under it.  True otherwise, including for a directory that
+// is itself ignored but under which some source has a rule that could
+// match — because an ignored directory whose contents a later source
+// re-includes has to be read to find them.
+//
+// This is a question about the rules and the path.  It opens nothing:
+// a caller walking a tree calls it with each directory it is about to
+// list.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "target/\n"))
+//     println("${gimatcher.should_descend(m, "target")}")
+//     println("${gimatcher.should_descend(m, "src")}")
+// ```
+pub fn should_descend(m: GiMatcher, dir: Str) -> Bool []
+    todo("gitignore-nv.gimatcher.should_descend")
+
+// The source that decided, as its index in `sources`, or `-1` when
+// nothing did.
+//
+// With `gilist.decision_line` this is the whole of
+// `git check-ignore -v`: which file, and which line of it.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.o\n"))
+//     println("${gimatcher.deciding_source(m, "main.o", false)}")
+// ```
+pub fn deciding_source(m: GiMatcher, path: Str, is_dir: Bool) -> Int []
+    todo("gitignore-nv.gimatcher.deciding_source")
+
+// The ancestor directories of a path, shallowest first, without the
+// path itself.
+//
+// `"a/b/c.txt"` gives `["a", "a/b"]`.  The walk `decide` makes, on its
+// own, for a caller that wants to ask about each of them.
+//
+// ```novo
+// use gimatcher
+//
+// fn main() [io]
+//     println("${list.len(gimatcher.ancestors_of("a/b/c.txt"))}")
+// ```
+pub fn ancestors_of(path: Str) -> [Str] []
+    todo("gitignore-nv.gimatcher.ancestors_of")
+
+// A path expressed relative to a base directory, or `None` when it is
+// not under that base.
+//
+// What `gilist.decide` does before it matches, offered on its own
+// because a caller building sources for a nested file needs the same
+// arithmetic.  `"", "a/b"` gives `"a/b"`; `"a", "a/b"` gives `"b"`;
+// `"a", "c"` gives `None`.
+//
+// ```novo
+// use gimatcher
+//
+// fn main() [io]
+//     match gimatcher.under_base("a", "a/b")
+//         Some(rest) => println(rest)
+//         None       => println("not under that base")
+// ```
+pub fn under_base(base: Str, path: Str) -> ?Str []
+    todo("gitignore-nv.gimatcher.under_base")
+
+// The options this matcher hands to every rule it evaluates.
+//
+// The value `gipattern.matches` is called with, so a caller reaching
+// past the matcher to a single rule asks the same question the matcher
+// would have asked.
+//
+// ```novo
+// use gimatcher
+//
+// fn main() [io]
+//     println("${gimatcher.options_of(gimatcher.empty()).literal_leading_dot}")
+// ```
+pub fn options_of(m: GiMatcher) -> glob.Options []
+    todo("gitignore-nv.gimatcher.options_of")
+
+// Every rule in the stack that matches a path, in precedence order,
+// highest-precedence source first and within a source in file order.
+//
+// `decide` answers which rule won; this answers all of them.  A tool
+// that lints a repository's gitignore files for a rule no path can
+// reach, or that shows an author every line involved in a decision,
+// needs the whole list rather than the winner.
+//
+// ```novo
+// use gilist
+// use gimatcher
+//
+// fn main() [io]
+//     let m = gimatcher.add(gimatcher.empty(), gilist.parse("", "*.log\n!keep.log\n"))
+//     println("${list.len(gimatcher.matching_rules(m, "keep.log", false))}")
+// ```
+pub fn matching_rules(m: GiMatcher, path: Str, is_dir: Bool) -> [gipattern.GiPattern] []
+    todo("gitignore-nv.gimatcher.matching_rules")

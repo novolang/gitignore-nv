@@ -1,0 +1,191 @@
+// gilist.nv — one gitignore file, with the directory it was found in.
+//
+// A FILE WITHOUT ITS DIRECTORY IS NOT A GITIGNORE FILE
+//
+// Every rule in a gitignore file is relative to the directory that
+// file sits in.  `/build` in the repository's top-level file means the
+// top-level `build`; the same line in `docs/.gitignore` means
+// `docs/build`.  A list that carried only the rules would be a list
+// nobody could apply, so a `GiList` carries the base directory and
+// `decide` converts a path into that base's frame before it matches.
+//
+// LAST MATCH WINS, WITHIN ONE FILE
+//
+// gitignore(5) is explicit: the last matching pattern in a file
+// decides.  That is what makes `!` useful — `*.log` followed by
+// `!keep.log` re-includes one file — and it is why `decide` scans to
+// the end rather than stopping at the first match.  A list that
+// stopped early would give the opposite answer for every file whose
+// author wrote an exception.
+
+use gipattern
+use glob
+
+// What a set of rules says about one path.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     println(gilist.decision_name(GiUnmatched))
+// ```
+pub enum GiDecision
+    // No rule in this list matched, so this list says nothing.  A
+    // caller consults the next source, and a path nothing matches is
+    // not ignored.
+    GiUnmatched
+    // The last matching rule was an ordinary one: the path is ignored.
+    // `line` is its 1-based line number in the file, so a caller can
+    // say which rule did it.
+    GiIgnored(line: Int)
+    // The last matching rule began with `!`: the path is re-included.
+    // Not the same answer as `GiUnmatched` — a re-inclusion is a
+    // decision, and it stops a lower-precedence file from ignoring the
+    // path.
+    GiIncluded(line: Int)
+
+// One gitignore file: where it was found, and what it says.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     let l = gilist.parse("", "*.o\n!keep.o\n")
+//     println("${list.len(l.patterns)}")
+// ```
+pub struct GiList
+    // The directory this file sits in, relative to the root every path
+    // handed to the matcher is relative to, with `/` as the separator
+    // and no leading or trailing slash.  `""` is the root itself.
+    base: Str
+    // Every line of the file, in order, blanks and comments included,
+    // so that a pattern's index is its line number less one.
+    patterns: [gipattern.GiPattern]
+
+// A file's text, read into a list.
+//
+// Lines are split on `\n`, and a trailing `\r` is stripped, because a
+// gitignore file written on Windows is still a gitignore file.  Every
+// line becomes a `GiPattern`, blanks and comments included.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     let l = gilist.parse("docs", "build/\n")
+//     println(l.base)
+// ```
+pub fn parse(base: Str, text: Str) -> GiList []
+    todo("gitignore-nv.gilist.parse")
+
+// A list built from patterns already parsed.
+//
+// For a caller whose rules did not come from a file — a `--exclude`
+// flag, a configuration key, a set of defaults compiled in.
+//
+// ```novo
+// use gilist
+// use gipattern
+//
+// fn main() [io]
+//     let l = gilist.of(".", [gipattern.parse("*.tmp")])
+//     println("${list.len(l.patterns)}")
+// ```
+pub fn of(base: Str, patterns: [gipattern.GiPattern]) -> GiList []
+    todo("gitignore-nv.gilist.of")
+
+// What this file says about a path.
+//
+// `path` is relative to the root, not to this file's base.  A path
+// outside this file's base is `GiUnmatched`, which is the rule that
+// makes a nested gitignore file mean nothing outside its own subtree.
+//
+// The last matching rule decides, so the scan runs to the end of the
+// file.
+//
+// ```novo
+// use gilist
+// use gipattern
+//
+// fn main() [io]
+//     let l = gilist.parse("", "*.log\n!keep.log\n")
+//     println(gilist.decision_name(gilist.decide(l, "keep.log", false, gipattern.options())))
+// ```
+pub fn decide(l: GiList, path: Str, is_dir: Bool, o: glob.Options) -> GiDecision []
+    todo("gitignore-nv.gilist.decide")
+
+// Whether any rule in this file could match something inside a
+// directory.
+//
+// False means nothing under that directory can be ignored by this
+// file, which is what lets a walker skip a subtree without opening it.
+// A file whose base is below the directory answers true, because its
+// rules apply inside it.
+//
+// ```novo
+// use gilist
+// use gipattern
+//
+// fn main() [io]
+//     let l = gilist.parse("", "src/**/target/\n")
+//     println("${gilist.may_contain_match(l, "src/a", gipattern.options())}")
+// ```
+pub fn may_contain_match(l: GiList, dir: Str, o: glob.Options) -> Bool []
+    todo("gitignore-nv.gilist.may_contain_match")
+
+// The decision's name for a message: `"unmatched"`, `"ignored"`,
+// `"included"`.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     println(gilist.decision_name(GiIgnored(3)))
+// ```
+pub fn decision_name(d: GiDecision) -> Str []
+    todo("gitignore-nv.gilist.decision_name")
+
+// The line number the decision came from, or `0` when nothing matched.
+//
+// `git check-ignore -v` prints exactly this, and a tool that wants to
+// tell a user which rule hid their file needs it.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     println("${gilist.decision_line(GiIncluded(2))}")
+// ```
+pub fn decision_line(d: GiDecision) -> Int []
+    todo("gitignore-nv.gilist.decision_line")
+
+// Whether a decision settles the question, so that no
+// lower-precedence source is consulted.
+//
+// True for `GiIgnored` and `GiIncluded`, false for `GiUnmatched`.  A
+// re-inclusion settles it: that is what stops a repository's top-level
+// `*.log` from ignoring a file a nested gitignore file un-ignored.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     println("${gilist.is_decided(GiUnmatched)}")
+// ```
+pub fn is_decided(d: GiDecision) -> Bool []
+    todo("gitignore-nv.gilist.is_decided")
+
+// The rules in a file, with the blanks and the comments left out.
+//
+// The lines that can match, for a caller counting rules or printing
+// them.  A pattern's line number is not recoverable from this list,
+// which is why `decide` carries one.
+//
+// ```novo
+// use gilist
+//
+// fn main() [io]
+//     println("${list.len(gilist.rules_of(gilist.parse("", "# c\n*.o\n")))}")
+// ```
+pub fn rules_of(l: GiList) -> [gipattern.GiPattern] []
+    todo("gitignore-nv.gilist.rules_of")
