@@ -1,6 +1,6 @@
 [package]
 name        = "gitignore-nv"
-version     = "0.0.1"
+version     = "0.0.2"
 description = "gitignore(5) semantics as a matcher value: the pattern grammar with negation, anchoring, directory-only rules, `**`, character classes and escaping, several files each with its own base directory, and the precedence that decides between them — answered over a path the caller hands in, with no directory ever opened."
 license     = "Apache-2.0"
 
